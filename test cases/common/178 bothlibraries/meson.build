@@ -1,7 +1,8 @@
-project('both libraries linking test', 'c')
+project('both libraries linking test', 'c', 'cpp')
 
 both_libs = both_libraries('mylib', 'libfile.c')
 dep = declare_dependency(link_with: both_libs)
+alias_target('alias', both_libs)
 exe_shared = executable('prog-shared', 'main.c', link_with : both_libs.get_shared_lib())
 exe_static = executable('prog-static', 'main.c',
                         c_args : ['-DSTATIC_COMPILATION'],
@@ -48,3 +49,24 @@ assert(both_libs3.get_static_lib().name() == 'mylib')
 test('runtest-shared-2', exe_shared2)
 test('runtest-static-2', exe_static2)
 test('runtest-both-2', exe_both2)
+
+# Regression test: libccpp has both C and C++ sources. The executable only has
+# C sources. It should still link using the C++ compiler. When using
+# both_libraries the static has no sources and thus no compilers, resulting in
+# the executable linking using the C compiler.
+# https://github.com/Netflix/vmaf/issues/1107
+libccpp = both_libraries('ccpp', 'foo.cpp', 'libfile.c',
+  cpp_args : ['-std=c++11'],
+  c_static_args : ['-DSTATIC_COMPILATION'],
+  cpp_static_args : ['-DSTATIC_COMPILATION'],
+)
+exe = executable('prog-ccpp', 'main2.c',
+  link_with: libccpp.get_static_lib(),
+  c_args : ['-DSTATIC_COMPILATION'],
+)
+test('runtest-ccpp', exe)
+
+exe = executable('prog-ccpp-shared', 'main2.c',
+  link_with: libccpp.get_shared_lib(),
+)
+test('runtest-ccpp-shared', exe)

@@ -64,7 +64,7 @@ executable('sdlprog', 'sdlprog.c')
 
 With this done we can start the build with the following command:
 
-    meson builddir
+    meson setup builddir
 
 Here `builddir` is the _build directory_, everything that is generated
 during the build is put in that directory. When run, it should look
@@ -170,6 +170,20 @@ executable('sdlprog', 'sdlprog.c',
            dependencies: sdl2_dep)
 ```
 
+**NOTE:** If you're on Windows you need to include the sdl2main dependency as well; To do so you can modify the above build script like so:
+
+```meson
+project('sdldemo', 'c',
+        default_options: 'default_library=static')
+
+sdl2_dep = dependency('sdl2')
+sdl2_main_dep = dependency('sdl2main')
+
+executable('sdlprog', 'sdlprog.c',
+           win_subsystem: 'windows',
+           dependencies: [sdl2_dep, sdl2_main_dep])
+```
+
 In addition to the dependency this has a few other changes. First we
 specify that we want to build helper libraries statically. For simple
 projects like these it makes things simpler. We also need to tell
@@ -181,7 +195,7 @@ the system downloads and configures SDL2:
 
 ![Running the sample application](images/sdltutorial_05.png)
 
-A bit later the compilation exits succesfully.
+A bit later the compilation exits successfully.
 
 ![Running the sample application](images/sdltutorial_06.png)
 

@@ -7,7 +7,7 @@ short-description: Configuring a pre-generated build directory
 Often you want to change the settings of your build after it has been
 generated. For example you might want to change from a debug build
 into a release build, set custom compiler flags, change the build
-options provided in your `meson_options.txt` file and so on.
+options provided in your `meson.options` file and so on.
 
 The main tool for this is the `meson configure` command.
 
@@ -30,10 +30,11 @@ a sample output for a simple project.
       default_library shared        [shared, static, both]                                     Default library type
       install_umask   0022          [preserve, 0000-0777]                                      Default umask to apply on permissions of installed files
       layout          mirror        [mirror, flat]                                             Build directory layout
-      optimization    3             [0, g, 1, 2, 3, s]                                         Optimization level
+      optimization    3             [plain, 0, g, 1, 2, 3, s]                                  Optimization level
+      prefer_static   false         [true, false]                                              Whether to try static linking before shared linking
       strip           false         [true, false]                                              Strip targets on install
       unity           off           [on, off, subprojects]                                     Unity build
-      warning_level   1             [0, 1, 2, 3]                                               Compiler warning level to use
+      warning_level   1             [0, 1, 2, 3, everything]                                   Compiler warning level to use
       werror          false         [true, false]                                              Treat warnings as errors
 
     Backend options:
@@ -52,7 +53,7 @@ a sample output for a simple project.
       b_ndebug    false         [true, false, if-release]                                     Disable asserts
       b_pch       true          [true, false]                                                 Use precompiled headers
       b_pgo       off           [off, generate, use]                                          Use profile guided optimization
-      b_sanitize  none          [none, address, thread, undefined, memory, address,undefined] Code sanitizer to use
+      b_sanitize  none          [none, address, thread, undefined, leak, memory, address,undefined] Code sanitizer to use
       b_staticpic true          [true, false]                                                 Build static libraries as position independent
 
     Compiler options:
@@ -60,7 +61,7 @@ a sample output for a simple project.
       ------        ------------- ---------------                                                                                               -----------
       c_args        []                                                                                                                          Extra arguments passed to the C compiler
       c_link_args   []                                                                                                                          Extra arguments passed to the C linker
-      c_std         c99           [none, c89, c99, c11, c17, c18, c2x, gnu89, gnu99, gnu11, gnu17, gnu18, gnu2x]                                C language standard to use
+      c_std         c99           [none, c89, c99, c11, c17, c18, c2x, c23, gnu89, gnu99, gnu11, gnu17, gnu18, gnu2x, gnu23]                                C language standard to use
       cpp_args      []                                                                                                                          Extra arguments passed to the C++ compiler
       cpp_debugstl  false         [true, false]                                                                                                 STL debug mode
       cpp_link_args []                                                                                                                          Extra arguments passed to the C++ linker

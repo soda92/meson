@@ -12,6 +12,15 @@ authors:
 This module provides support for finding and building extensions against
 python installations, be they python 2 or 3.
 
+If you want to build and package Python extension modules using tools
+compatible with [PEP-517](https://peps.python.org/pep-0517/), check out
+[meson-python](https://mesonbuild.com/meson-python/index.html).
+
+If you are building Python extension modules against a Python interpreter
+located in a venv or Conda environment, you probably want to set
+`python.install_env=auto`;
+see [Python module options](Builtin-options.md#python-module) for details.
+
 *Added 0.46.0*
 
 ## Functions
@@ -37,7 +46,10 @@ If provided, it can be:
 - One of `python2` or `python3`: in either case, the module will try
   some alternative names: `py -2` or `py -3` on Windows, and `python`
   everywhere. In the latter case, it will check whether the version
-  provided by the sysconfig module matches the required major version
+  provided by the sysconfig module matches the required major version.
+
+  *Since 1.2.0*, searching for minor version (e.g. `python3.11`) also
+  works on Windows.
 
 Keyword arguments are the following:
 
@@ -53,6 +65,12 @@ Keyword arguments are the following:
   *Since 0.49.0*
 - `modules`: a list of module names that this python installation must have.
   *Since 0.51.0*
+- `pure`: On some platforms, architecture independent files are
+  expected to be placed in a separate directory. However, if the
+  python sources should be installed alongside an extension module
+  built with this module, this keyword argument can be used to
+  override the default behavior of `.install_sources()`.
+  *since 0.64.0*
 
 **Returns**: a [python installation][`python_installation` object]
 
@@ -92,10 +110,23 @@ the addition of the following:
   `/usr/lib/site-packages`. When subdir is passed to this method,
   it will be appended to that location. This keyword argument is
   mutually exclusive with `install_dir`
+- `limited_api`: *since 1.3.0* A string containing the Python version
+  of the [Py_LIMITED_API](https://docs.python.org/3/c-api/stable.html) that
+  the extension targets. For example, '3.7' to target Python 3.7's version of
+  the limited API. This behavior can be disabled by setting the value of
+  `python.allow_limited_api`. See [Python module options](Builtin-options.md#python-module).
 
-`extension_module` does not add any dependencies to the library so
-user may need to add `dependencies : py_installation.dependency()`,
-see [[dependency]].
+Additionally, the following diverge from [[shared_module]]'s default behavior:
+
+- `gnu_symbol_visibility`: if unset, it will default to `'hidden'` on versions
+  of Python that support this (the python headers define `PyMODINIT_FUNC` has
+  default visibility).
+  
+Note that Cython support uses `extension_module`, see [the reference for Cython](Cython.md).
+
+*since 0.63.0* `extension_module` automatically adds a dependency to the library
+if one is not explicitly provided. To support older versions, the user may need to
+add `dependencies : py_installation.dependency()`, see [[dependency]].
 
 **Returns**: a [[@build_tgt]] object
 
@@ -104,6 +135,8 @@ see [[dependency]].
 ``` meson
 python_dependency py_installation.dependency(...)
 ```
+
+*since 0.53.0*
 
 This method accepts no positional arguments, and the same keyword
 arguments as the standard [[dependency]] function. It also supports the
@@ -135,7 +168,8 @@ to control the default installation path. See [Python module options](Builtin-op
   expected to be placed in a separate directory. However, if the
   python sources should be installed alongside an extension module
   built with this module, this keyword argument can be used to
-  override that behaviour. Defaults to `true`
+  override that behaviour. Defaults to the value specified in
+  `find_installation()`, or else `true`
 
 - `subdir`: See documentation for the argument of the same name to
   [][`extension_module()`]

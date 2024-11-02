@@ -37,20 +37,20 @@ executable('myapp', 'app.d', d_debug: [3, 'DebugFeatureA'])
 
 ## In `declare_dependency`
 
-*Since 0.62.0*, when declaring your own dependency using `declare_dependency`, it is
-possible to add parameters for D specific features, e.g. to propagate
+*Since 0.62.0*, when declaring your own dependency using `declare_dependency`,
+it is possible to add parameters for D specific features, e.g. to propagate
 conditional compilation versions:
 
 ```meson
 my_dep = declare_dependency(
     # ...
-    d_module_features: ['LUA_53'],
+    d_module_versions: ['LUA_53'],
     d_import_dirs: include_directories('my_lua_folder'),
 )
 ```
 
-Accepted D specific parameters are `d_module_features` and
-`d_import_dirs`.
+Accepted D specific parameters are `d_module_versions` and `d_import_dirs`
+(DMD `-J` switch).
 
 ## Using embedded unittests
 
@@ -95,7 +95,7 @@ my_lib = library('mylib',
     install: true,
     version: meson.project_version(),
     soversion: project_soversion,
-    d_module_versions: ['FeatureA', 'featureB']
+    d_module_versions: ['FeatureA', 'featureB', 1]
 )
 
 pkgc = import('pkgconfig')
@@ -104,7 +104,7 @@ pkgc.generate(name: 'mylib',
               subdirs: 'd/mylib',
               version: meson.project_version(),
               description: 'A simple example D library.',
-              d_module_versions: ['FeatureA']
+              d_module_versions: ['FeatureA', 1]
 )
 install_subdir('src/mylib/', install_dir: 'include/d/mylib/')
 ```
@@ -139,6 +139,6 @@ DUB is a fully integrated build system for D, but it is also a way to
 provide dependencies. Adding dependencies from the [D package
 registry](https://code.dlang.org/) is pretty straight forward. You can
 find how to do this in
-[Dependencies](Dependencies.md#some-notes-on-dub). You can also
+[Dependencies](Dependencies.md#dub). You can also
 automatically generate a `dub.json` file as explained in
 [Dlang](Dlang-module.md#generate_dub_file).

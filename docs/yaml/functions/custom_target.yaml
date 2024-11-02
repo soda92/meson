@@ -6,7 +6,7 @@ description: |
   The name of custom target might not be used by every backends, for instance with
   the Ninja backend, `subdir/meson.build` containing the example below,
   `ninja -C builddir foo` or `ninja -C builddir subdir/foo` won't work,
-  it is instead `ninja -C builddir subdir/file.txt`. Howerver, `meson compile subdir/foo`
+  it is instead `ninja -C builddir subdir/file.txt`. However, `meson compile subdir/foo`
   is accepted.
   ```meson
   custom_target('foo', output: 'file.txt', ...)
@@ -31,7 +31,9 @@ description: |
   - `@OUTDIR@`: the full path to the directory where the output(s) must be written
   - `@DEPFILE@`: the full path to the dependency file passed to `depfile`
   - `@PLAINNAME@`: the input filename, without a path
+  - `@PLAINNAME0@` `@PLAINNAME1@` `...` *(since 1.5.0)*: the input filename without a path, with the specified array index in `input`
   - `@BASENAME@`: the input filename, with extension removed
+  - `@BASENAME0@` `@BASENAME1@` `...` *(since 1.5.0)*: the input filename with extension removed, with the specified array index in `input`
   - `@PRIVATE_DIR@` *(since 0.50.1)*: path to a directory where the custom target must store all its intermediate files.
   - `@SOURCE_ROOT@`: the path to the root of the source tree. Depending on the backend,
     this may be an absolute or a relative to current workdir path.
@@ -51,6 +53,9 @@ notes:
     Assuming that `command:` is executed by a POSIX `sh` shell
     is not portable, notably to Windows. Instead, consider using a
     `native: true` [[executable]], or a python script.
+
+warnings:
+  - the `install_mode` kwarg ignored integer values between 0.60.0 -- 1.1.0.
 
 optargs:
   name:
@@ -135,14 +140,15 @@ kwargs:
       argument. Useful for adding regen dependencies.
 
   depends:
-    type: list[build_tgt | custom_tgt]
+    type: list[build_tgt | custom_tgt | custom_idx]
     description: |
       Specifies that this target depends on the specified
       target(s), even though it does not take any of them as a command
       line argument. This is meant for cases where you have a tool that
       e.g. does globbing internally. Usually you should just put the
       generated sources as inputs and Meson will set up all dependencies
-      automatically.
+      automatically (custom_idx was unavailable as a type between 0.60
+      and 1.4.0).
 
   depfile:
     type: str
@@ -161,10 +167,11 @@ kwargs:
 
   install:
     type: bool
-    description: When true, this target is installed during the install step.
+    description: When true, one or more files of this target are installed during
+      the install step (see `install_dir` for details).
 
   install_dir:
-    type: str | list[str]
+    type: str | list[str | bool]
     description: |
       If only one install_dir is provided, all outputs are installed there.
       *Since 0.40.0* Allows you to specify the installation directory for each

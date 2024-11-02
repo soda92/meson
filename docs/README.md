@@ -8,6 +8,10 @@ Minimum required version of hotdoc is *0.8.9*.
 
 Instructions on how to install hotdoc are [here](https://hotdoc.github.io/installing.html).
 
+Our custom hotdoc extensions require:
+- [chevron](https://pypi.org/project/chevron)
+- [strictyaml](https://pypi.org/project/strictyaml)
+
 ## Building the documentation
 
 From the Meson repository root dir:
@@ -29,12 +33,4 @@ removes the html pages and replaces with the new content.
 You can simply run:
 ```
 $ ninja -C built_docs/ upload
-```
-
-## Contributing to the documentation
-
-Commits that only change documentation should have `[skip ci]` in their commit message, so CI is not run (it is quite slow).
-For example:
-```
-A commit message [skip ci]
 ```

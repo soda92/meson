@@ -1,4 +1,4 @@
-project('custom target dependency', 'c')
+project('custom target dependency')
 
 # Sometimes custom targets do not take input files
 # but instead do globbing or some similar wackiness.
@@ -18,3 +18,8 @@ custom_target('output',
 output : 'output.dat',
 command : [g2, '@OUTDIR@', '@OUTPUT@'],
 depends : c1)
+
+custom_target('output2',
+output : 'output2.dat',
+command : [g2, '@OUTDIR@', '@OUTPUT@'],
+depends : c1[0])

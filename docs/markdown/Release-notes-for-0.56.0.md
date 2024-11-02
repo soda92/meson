@@ -154,13 +154,13 @@ foo = 'other val'
 ```
 
 ```console
-meson builddir/ --native-file my.ini
+meson setup builddir/ --native-file my.ini
 ```
 
 Will result in the option foo having the value `other val`,
 
 ```console
-meson builddir/ --native-file my.ini -Dfoo='different val'
+meson setup builddir/ --native-file my.ini -Dfoo='different val'
 ```
 
 Will result in the option foo having the value `different val`,
@@ -281,7 +281,7 @@ the default compiler.
 
 ## External projects
 
-A new experimental module `unstable_external_project` has been added
+A new experimental module `unstable-external_project` has been added
 to build code using other build systems than Meson. Currently only
 supporting projects with a configure script that generates Makefiles.
 
@@ -290,7 +290,7 @@ project('My Autotools Project', 'c',
   meson_version : '>=0.56.0',
 )
 
-mod = import('unstable_external_project')
+mod = import('unstable-external_project')
 
 p = mod.add_project('configure',
   configure_options : ['--prefix=@PREFIX@',

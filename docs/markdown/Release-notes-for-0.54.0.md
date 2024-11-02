@@ -120,12 +120,12 @@ value < 1 lets the backend decide how many threads to use. For msbuild
 this means `-m`, for ninja it means passing no arguments.
 
 ```console
-meson builddir --backend vs
+meson setup builddir --backend vs
 meson compile -C builddir -j0  # this is the same as `msbuild builddir/my.sln -m`
 ```
 
 ```console
-meson builddir
+meson setup builddir
 meson compile -C builddir -j3  # this is the same as `ninja -C builddir -j3`
 ```
 
@@ -286,7 +286,7 @@ This old behavior is inconsistent with the way Autotools works, which
 undermines the purpose of distro-integration that is the only reason
 environment variables are supported at all in Meson. The new behavior
 is not quite the same, but doesn't conflict: Meson doesn't always
-repond to an environment when Autoconf would, but when it does it
+respond to an environment when Autoconf would, but when it does it
 interprets it as Autotools would.
 
 ## Added 'pkg_config_libdir' property

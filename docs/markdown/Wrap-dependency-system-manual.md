@@ -67,6 +67,7 @@ An example wrap-git will look like this:
 [wrap-git]
 url = https://github.com/libfoobar/libfoobar.git
 revision = head
+depth = 1
 ```
 
 ## Accepted configuration properties for wraps
@@ -84,6 +85,13 @@ previously reserved to `wrap-file`:
 - `patch_directory` - *Since 0.55.0* Overlay directory, alternative to `patch_filename` in the case
   files are local instead of a downloaded archive. The directory must be placed in
   `subprojects/packagefiles`.
+- `diff_files` - *Since 0.63.0* Comma-separated list of local diff files (see
+  [Diff files](#diff-files) below).
+- `method` - *Since 1.3.0* The build system used by this subproject. Defaults to `meson`.
+  Supported methods:
+  - `meson` requires `meson.build` file.
+  - `cmake` requires `CMakeLists.txt` file. [See details](#cmake-wraps).
+  - `cargo` requires `Cargo.toml` file. [See details](#cargo-wraps).
 
 ### Specific to wrap-file
 - `source_url` - download url to retrieve the wrap-file source archive
@@ -106,6 +114,12 @@ project's `subprojects/packagecache` directory, it will be used instead
 of downloading the file, even if `--wrap-mode` option is set to
 `nodownload`. The file's hash will be checked.
 
+Since *1.3.0* if the `MESON_PACKAGE_CACHE_DIR` environment variable is set, it is used instead of
+the project's `subprojects/packagecache`. This allows sharing the cache across multiple
+projects. In addition it can contain an already extracted source tree as long as it
+has the same directory name as the `directory` field in the wrap file. In that
+case, the directory will be copied into `subprojects/` before applying patches.
+
 ### Specific to VCS-based wraps
 - `url` - name of the wrap-git repository to clone. Required.
 - `revision` - name of the revision to checkout. Must be either: a
@@ -113,7 +127,8 @@ of downloading the file, even if `--wrap-mode` option is set to
   (for git) `head` to track upstream's default branch. Required.
 
 ### Specific to wrap-git
-- `depth` - shallowly clone the repository to X number of commits. Note
+- `depth` - shallowly clone the repository to X number of commits. This saves bandwidth and disk
+  space, and should typically always be specified unless commit history is needed. Note
   that git always allow shallowly cloning branches, but in order to
   clone commit ids shallowly, the server must support
   `uploadpack.allowReachableSHA1InWant=true`.  *(since 0.52.0)*
@@ -146,6 +161,37 @@ Prior to *0.55.0* Meson build patches were only supported for
 wrap-file mode. When using wrap-git, the repository must contain all
 Meson build definitions. Since *0.55.0* Meson build patches are
 supported for any wrap modes, including wrap-git.
+
+## Diff files
+
+*Since: 0.63.0*
+
+You can also provide local patch files in `diff` format. For historic reasons,
+they are referred to as "diff files", since the "patch" name is already used for
+overlay archives.
+
+The diff files are described by the `diff_files` property (a comma-separated
+list), and must be available locally in the `subprojects/packagefiles`
+directory.
+
+Meson will apply the diff files after extracting or cloning the project, and
+after applying the overlay archive (`patch_*`). For this feature, the `patch` or
+`git` command-line tool must be available.
+
+The diff files will be applied with `-p1`, i.e. treating the first path
+component as a prefix to be stripped. This is the default for diffs produced by
+Git.
+
+```ini
+[wrap-file]
+directory = libfoobar-1.0
+
+source_url = https://example.com/foobar-1.0.tar.gz
+source_filename = foobar-1.0.tar.gz
+source_hash = 5ebeea0dfb75d090ea0e7ff84799b2a7a1550db3fe61eb5f6f61c2e971e57663
+
+diff_files = libfoobar-1.0/0001.patch, libfoobar-1.0/0002.patch
+```
 
 ## `provide` section
 
@@ -216,6 +262,7 @@ and `gio-2.0`, a wrap file would look like:
 [wrap-git]
 url=https://gitlab.gnome.org/GNOME/glib.git
 revision=glib-2-62
+depth=1
 
 [provide]
 dependency_names = glib-2.0, gobject-2.0, gio-2.0
@@ -228,6 +275,7 @@ specified:
 [wrap-git]
 url=https://gitlab.gnome.org/GNOME/glib.git
 revision=glib-2-62
+depth=1
 
 [provide]
 glib-2.0=glib_dep
@@ -246,6 +294,77 @@ program_names = myprog, otherprog
 With such wrap file, `find_program('myprog')` will automatically
 fallback to use the subproject, assuming it uses
 `meson.override_find_program('myprog')`.
+
+### CMake wraps
+
+**Note**: This is experimental and has no backwards or forwards compatibility guarantees.
+See [Meson's rules on mixing build systems](Mixing-build-systems.md).
+
+Since the CMake module does not know the public name of the provided
+dependencies, a CMake `.wrap` file cannot use the `dependency_names = foo`
+syntax. Instead, the `dep_name = <target_name>_dep` syntax should be used, where
+`<target_name>` is the name of a CMake library with all non alphanumeric
+characters replaced by underscores `_`.
+
+For example, a CMake project that contains `add_library(foo-bar ...)` in its
+`CMakeList.txt` and that applications would usually find using the dependency
+name `foo-bar-1.0` (e.g. via pkg-config) would have a wrap file like this:
+
+```ini
+[wrap-file]
+...
+method = cmake
+[provide]
+foo-bar-1.0 = foo_bar_dep
+```
+### Cargo wraps
+
+**Note**: This is experimental and has no backwards or forwards compatibility guarantees.
+See [Meson's rules on mixing build systems](Mixing-build-systems.md).
+
+Cargo subprojects automatically override the `<package_name>-<version>-rs` dependency
+name:
+- `package_name` is defined in `[package] name = ...` section of the `Cargo.toml`.
+- `version` is the API version deduced from `[package] version = ...` as follow:
+  * `x.y.z` -> 'x'
+  * `0.x.y` -> '0.x'
+  * `0.0.x` -> '0'
+  It allows to make different dependencies for incompatible versions of the same
+  crate.
+- `-rs` suffix is added to distinguish from regular system dependencies, for
+  example `gstreamer-1.0` is a system pkg-config dependency and `gstreamer-0.22-rs`
+  is a Cargo dependency.
+
+That means the `.wrap` file should have `dependency_names = foo-1-rs` in their
+`[provide]` section when `Cargo.toml` has package name `foo` and version `1.2`.
+
+Note that the version component was added in Meson 1.4, previous versions were
+using `<package_name>-rs` format.
+
+Cargo subprojects require a toml parser. Python >= 3.11 have one built-in, older
+Python versions require either the external `tomli` module or `toml2json` program.
+
+For example, a Cargo project with the package name `foo-bar` would have a wrap
+file like that:
+```ini
+[wrap-file]
+...
+method = cargo
+[provide]
+dependency_names = foo-bar-0.1-rs
+```
+
+In addition, if the file `meson/meson.build` exists, Meson will call `subdir('meson')`
+where the project can add manual logic that would usually be part of `build.rs`.
+Some naming conventions need to be respected:
+- The `extra_args` variable is pre-defined and can be used to add any Rust arguments.
+  This is typically used as `extra_args += ['--cfg', 'foo']`.
+- The `extra_deps` variable is pre-defined and can be used to add extra dependencies.
+  This is typically used as `extra_deps += dependency('foo')`.
+
+Since *1.5.0* Cargo wraps can also be provided with `Cargo.lock` file at the root
+of (sub)project source tree. Meson will automatically load that file and convert
+it into a series of wraps definitions.
 
 ## Using wrapped projects
 

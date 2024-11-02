@@ -33,6 +33,11 @@ run_target('upload2',
   depends : hex,
 )
 
+run_target('upload3',
+  command : [fakeburner, 'x:@0@:y'.format(hex.full_path())],
+  depends : hex[0],
+)
+
 python3 = find_program('python3', required : false)
 if not python3.found()
   python3 = find_program('python')
@@ -78,8 +83,13 @@ custom_target('configure_script_ct',
 run_target('ctags',
   command : converter)
 
-run_target('clang-format',
-  command : converter)
+clangf = run_target('clang-format',
+  command : [converter, files('.clang-format'), meson.current_build_dir() / 'clang-format'])
+custom_target('clang-tidy',
+  input: '.clang-tidy',
+  output: 'clang-tidy',
+  command : [converter, '@INPUT@', '@OUTPUT@'])
+alias_target('clang-format-check', clangf)
 
 # Check we can pass env to the program. Also check some string substitutions
 # that were added in 0.57.0 but not documented. This is documented behaviour

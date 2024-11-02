@@ -19,9 +19,9 @@ directory, that file is loaded by gdb automatically.
 
 ## Print modified environment variables with `meson devenv --dump`
 
-With `--dump` option, all envorinment variables that have been modified are
+With `--dump` option, all environment variables that have been modified are
 printed instead of starting an interactive shell. It can be used by shell
-scripts that wish to setup their environment themself.
+scripts that wish to setup their environment themselves.
 
 ## New `method` and `separator` kwargs on `environment()` and `meson.add_devenv()`
 
@@ -176,7 +176,7 @@ Meson has a new command `env2mfile` that can be used to convert
 "environment variable based" cross and native compilation environments
 to Meson machine files. This is especially convenient for e.g. distro
 packagers so they can easily generate unambiguous configuration files
-for packge building.
+for package building.
 
 As an example here's how you would generate a cross file that takes
 its settings from the `CC`, `CXX`, `CFLAGS` etc environment variables.
@@ -376,14 +376,14 @@ Meson will now allow the pkg-config name to work in all cases using the followin
 ## D features in `declare_dependency`
 
 `declare_dependency`accepts parameters for D specific features.
-Accepted new parameters are `d_module_features` and `d_import_dirs`.
+Accepted new parameters are `d_module_versions` and `d_import_dirs`.
 
 This can be useful to propagate conditional compilation versions. E.g.:
 
 ```meson
 my_lua_dep = declare_dependency(
     # ...
-    d_module_features: ['LUA_53'],
+    d_module_versions: ['LUA_53'],
     d_import_dirs: include_directories('my_lua_folder'),
 )
 ```

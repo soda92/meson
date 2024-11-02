@@ -1,69 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
 # Copyright 2022 The Meson development team
 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+from __future__ import annotations
 
-#     http://www.apache.org/licenses/LICENSE-2.0
-
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+from dataclasses import dataclass, field
 import sys, os, subprocess, shutil
 import shlex
+import typing as T
 
-import argparse
-from typing import TextIO, Dict, List, Union, Tuple, Any, Optional
-
+from .. import envconfig
 from .. import mlog
+from ..compilers import compilers
+from ..compilers.detect import defaults as compiler_names
 
-UNIXY_ENVVARS_COMPILER = {'c': 'CC',
-                          'cpp': 'CXX',
-                          'objc': 'OBJCC',
-                          'objcpp': 'OBJCXX',
-                          'fortran': 'FC',
-                          'rust': 'RUSTC',
-                          'vala': 'VALAC',
-                          'cs': 'CSC',
-                          }
-
-UNIXY_ENVVARS_TOOLS = {'ar': 'AR',
-                       'strip': 'STRIP',
-                       'windres': 'WINDRES',
-                       'pkgconfig': 'PKG_CONFIG',
-                       'vapigen': 'VAPIGEN',
-                       'cmake': 'CMAKE',
-                       'qmake': 'QMAKE',
-                       }
-
-UNIXY_ENVVARS_FLAGS = {'c': 'CFLAGS',
-                       'cpp': 'CXXFLAGS',
-                       'objc': 'OBJCFLAGS',
-                       'objcpp': 'OBJCXXFLAGS',
-                       'fortran': 'FFLAGS',
-                       'rust': 'RUSTFLAGS',
-                       'vala': 'VALAFLAGS',
-                       'cs': 'CSFLAGS', # This one might not be standard.
-                       }
-
-TYPICAL_UNIXY_COMPILER_NAMES = {'c': ['cc', 'gcc', 'clang'],
-                                'cpp': ['c++', 'g++', 'clang++'],
-                                'objc': ['objc', 'clang'],
-                                'objcpp': ['objcpp', 'clang++'],
-                                'fortran': ['gfortran'],
-                                }
-
-LANGS_USING_CPPFLAGS = {'c', 'cpp', 'objc', 'objcxx'}
+if T.TYPE_CHECKING:
+    import argparse
 
 def has_for_build() -> bool:
-    for cenv in UNIXY_ENVVARS_COMPILER.values():
+    for cenv in envconfig.ENV_VAR_COMPILER_MAP.values():
         if os.environ.get(cenv + '_FOR_BUILD'):
             return True
     return False
 
+# Note: when adding arguments, please also add them to the completion
+# scripts in $MESONSRC/data/shell-completions/
 def add_arguments(parser: 'argparse.ArgumentParser') -> None:
     parser.add_argument('--debarch', default=None,
                         help='The dpkg architecture to generate.')
@@ -77,6 +37,10 @@ def add_arguments(parser: 'argparse.ArgumentParser') -> None:
                         help='Generate a native compilation file.')
     parser.add_argument('--system', default=None,
                         help='Define system for cross compilation.')
+    parser.add_argument('--subsystem', default=None,
+                        help='Define subsystem for cross compilation.')
+    parser.add_argument('--kernel', default=None,
+                        help='Define kernel for cross compilation.')
     parser.add_argument('--cpu', default=None,
                         help='Define cpu for cross compilation.')
     parser.add_argument('--cpu-family', default=None,
@@ -84,18 +48,21 @@ def add_arguments(parser: 'argparse.ArgumentParser') -> None:
     parser.add_argument('--endian', default='little', choices=['big', 'little'],
                         help='Define endianness for cross compilation.')
 
+@dataclass
 class MachineInfo:
-    def __init__(self) -> None:
-        self.compilers: Dict[str, List[str]] = {}
-        self.binaries: Dict[str, List[str]] = {}
-        self.properties: Dict[str, Union[str, List[str]]] = {}
-        self.compile_args: Dict[str, List[str]] = {}
-        self.link_args: Dict[str, List[str]] = {}
+    compilers: T.Dict[str, T.List[str]] = field(default_factory=dict)
+    binaries: T.Dict[str, T.List[str]] = field(default_factory=dict)
+    properties: T.Dict[str, T.Union[str, T.List[str]]] = field(default_factory=dict)
+    compile_args: T.Dict[str, T.List[str]] = field(default_factory=dict)
+    link_args: T.Dict[str, T.List[str]] = field(default_factory=dict)
+    cmake: T.Dict[str, T.Union[str, T.List[str]]] = field(default_factory=dict)
 
-        self.system: Optional[str] = None
-        self.cpu: Optional[str] = None
-        self.cpu_family: Optional[str] = None
-        self.endian: Optional[str] = None
+    system: T.Optional[str] = None
+    subsystem: T.Optional[str] = None
+    kernel: T.Optional[str] = None
+    cpu: T.Optional[str] = None
+    cpu_family: T.Optional[str] = None
+    endian: T.Optional[str] = None
 
 #parser = argparse.ArgumentParser(description='''Generate cross compilation definition file for the Meson build system.
 #
@@ -108,7 +75,7 @@ class MachineInfo:
 #'''
 #)
 
-def locate_path(program: str) -> List[str]:
+def locate_path(program: str) -> T.List[str]:
     if os.path.isabs(program):
         return [program]
     for d in os.get_exec_path():
@@ -117,12 +84,15 @@ def locate_path(program: str) -> List[str]:
             return [f]
     raise ValueError("%s not found on $PATH" % program)
 
-def write_args_line(ofile: TextIO, name: str, args: List[str]) -> None:
+def write_args_line(ofile: T.TextIO, name: str, args: T.Union[str, T.List[str]]) -> None:
     if len(args) == 0:
         return
-    ostr = name + ' = ['
-    ostr += ', '.join("'" + i + "'" for i in args)
-    ostr += ']\n'
+    if isinstance(args, str):
+        ostr = name + "= '" + args + "'\n"
+    else:
+        ostr = name + ' = ['
+        ostr += ', '.join("'" + i + "'" for i in args)
+        ostr += ']\n'
     ofile.write(ostr)
 
 def get_args_from_envvars(infos: MachineInfo) -> None:
@@ -160,12 +130,55 @@ def get_args_from_envvars(infos: MachineInfo) -> None:
     if objcpp_link_args:
         infos.link_args['objcpp'] = objcpp_link_args
 
-cpu_family_map = dict(mips64el="mips64",
-                      i686='x86')
-cpu_map = dict(armhf="arm7hlf",
-               mips64el="mips64",)
+# map from DEB_HOST_GNU_CPU to Meson machine.cpu_family()
+deb_cpu_family_map = {
+    'mips64el': 'mips64',
+    'i686': 'x86',
+    'powerpc64le': 'ppc64',
+}
 
-def deb_compiler_lookup(infos: MachineInfo, compilerstems: List[Tuple[str, str]], host_arch: str, gccsuffix: str) -> None:
+# map from DEB_HOST_ARCH to Meson machine.cpu()
+deb_arch_cpu_map = {
+    'armhf': 'arm7hlf',
+}
+
+# map from DEB_HOST_GNU_CPU to Meson machine.cpu()
+deb_cpu_map = {
+    'mips64el': 'mips64',
+    'powerpc64le': 'ppc64',
+}
+
+# map from DEB_HOST_ARCH_OS to Meson machine.system()
+deb_os_map = {
+    'hurd': 'gnu',
+}
+
+# map from DEB_HOST_ARCH_OS to Meson machine.kernel()
+deb_kernel_map = {
+    'kfreebsd': 'freebsd',
+    'hurd': 'gnu',
+}
+
+def replace_special_cases(special_cases: T.Mapping[str, str], name: str) -> str:
+    '''
+    If name is a key in special_cases, replace it with the value, or otherwise
+    pass it through unchanged.
+    '''
+    return special_cases.get(name, name)
+
+def deb_detect_cmake(infos: MachineInfo, data: T.Dict[str, str]) -> None:
+    system_name_map = {'linux': 'Linux', 'kfreebsd': 'kFreeBSD', 'hurd': 'GNU'}
+    system_processor_map = {'arm': 'armv7l', 'mips64el': 'mips64', 'powerpc64le': 'ppc64le'}
+
+    infos.cmake["CMAKE_C_COMPILER"] = infos.compilers['c']
+    try:
+        infos.cmake["CMAKE_CXX_COMPILER"] = infos.compilers['cpp']
+    except KeyError:
+        pass
+    infos.cmake["CMAKE_SYSTEM_NAME"] = system_name_map[data['DEB_HOST_ARCH_OS']]
+    infos.cmake["CMAKE_SYSTEM_PROCESSOR"] = replace_special_cases(system_processor_map, data['DEB_HOST_GNU_CPU'])
+
+def deb_compiler_lookup(infos: MachineInfo, compilerstems: T.List[T.Tuple[str, str]], host_arch: str, gccsuffix: str) -> None:
     for langname, stem in compilerstems:
         compilername = f'{host_arch}-{stem}{gccsuffix}'
         try:
@@ -174,13 +187,16 @@ def deb_compiler_lookup(infos: MachineInfo, compilerstems: List[Tuple[str, str]]
         except ValueError:
             pass
 
-def detect_cross_debianlike(options: Any) -> MachineInfo:
-    if options.debarch is None:
+def detect_cross_debianlike(options: T.Any) -> MachineInfo:
+    if options.debarch == 'auto':
         cmd = ['dpkg-architecture']
     else:
         cmd = ['dpkg-architecture', '-a' + options.debarch]
     output = subprocess.check_output(cmd, universal_newlines=True,
                                      stderr=subprocess.DEVNULL)
+    return dpkg_architecture_to_machine_info(output, options)
+
+def dpkg_architecture_to_machine_info(output: str, options: T.Any) -> MachineInfo:
     data = {}
     for line in output.split('\n'):
         line = line.strip()
@@ -189,11 +205,12 @@ def detect_cross_debianlike(options: Any) -> MachineInfo:
         k, v = line.split('=', 1)
         data[k] = v
     host_arch = data['DEB_HOST_GNU_TYPE']
-    host_os = data['DEB_HOST_ARCH_OS']
-    host_cpu_family = cpu_family_map.get(data['DEB_HOST_GNU_CPU'],
-                                         data['DEB_HOST_GNU_CPU'])
-    host_cpu = cpu_map.get(data['DEB_HOST_ARCH'],
-                           data['DEB_HOST_ARCH'])
+    host_os = replace_special_cases(deb_os_map, data['DEB_HOST_ARCH_OS'])
+    host_subsystem = host_os
+    host_kernel = replace_special_cases(deb_kernel_map, data['DEB_HOST_ARCH_OS'])
+    host_cpu_family = replace_special_cases(deb_cpu_family_map, data['DEB_HOST_GNU_CPU'])
+    host_cpu = deb_arch_cpu_map.get(data['DEB_HOST_ARCH'],
+                                    replace_special_cases(deb_cpu_map, data['DEB_HOST_GNU_CPU']))
     host_endian = data['DEB_HOST_ARCH_ENDIAN']
 
     compilerstems = [('c', 'gcc'),
@@ -209,14 +226,44 @@ def detect_cross_debianlike(options: Any) -> MachineInfo:
     infos.binaries['objcopy'] = locate_path("%s-objcopy" % host_arch)
     infos.binaries['ld'] = locate_path("%s-ld" % host_arch)
     try:
-        infos.binaries['pkgconfig'] =  locate_path("%s-pkg-config" % host_arch)
+        infos.binaries['cmake'] = locate_path("cmake")
+        deb_detect_cmake(infos, data)
     except ValueError:
-        pass # pkg-config is optional
+        pass
+    for tool in [
+        'g-ir-annotation-tool',
+        'g-ir-compiler',
+        'g-ir-doc-tool',
+        'g-ir-generate',
+        'g-ir-inspect',
+        'g-ir-scanner',
+        'pkg-config',
+    ]:
+        try:
+            infos.binaries[tool] = locate_path("%s-%s" % (host_arch, tool))
+        except ValueError:
+            pass    # optional
+    for tool, exe in [
+        ('exe_wrapper', 'cross-exe-wrapper'),
+    ]:
+        try:
+            infos.binaries[tool] = locate_path("%s-%s" % (host_arch, exe))
+        except ValueError:
+            pass
+    for tool, exe in [
+        ('vala', 'valac'),
+    ]:
+        try:
+            infos.compilers[tool] = locate_path("%s-%s" % (host_arch, exe))
+        except ValueError:
+            pass
     try:
         infos.binaries['cups-config'] = locate_path("cups-config")
     except ValueError:
         pass
     infos.system = host_os
+    infos.subsystem = host_subsystem
+    infos.kernel = host_kernel
     infos.cpu_family = host_cpu_family
     infos.cpu = host_cpu
     infos.endian = host_endian
@@ -226,7 +273,7 @@ def detect_cross_debianlike(options: Any) -> MachineInfo:
 
 def write_machine_file(infos: MachineInfo, ofilename: str, write_system_info: bool) -> None:
     tmpfilename = ofilename + '~'
-    with open(tmpfilename, 'w') as ofile:
+    with open(tmpfilename, 'w', encoding='utf-8') as ofile:
         ofile.write('[binaries]\n')
         ofile.write('# Compilers\n')
         for langname in sorted(infos.compilers.keys()):
@@ -240,7 +287,7 @@ def write_machine_file(infos: MachineInfo, ofilename: str, write_system_info: bo
             write_args_line(ofile, exename, exe)
         ofile.write('\n')
 
-        ofile.write('[properties]\n')
+        ofile.write('[built-in options]\n')
         all_langs = list(set(infos.compile_args.keys()).union(set(infos.link_args.keys())))
         all_langs.sort()
         for lang in all_langs:
@@ -250,32 +297,55 @@ def write_machine_file(infos: MachineInfo, ofilename: str, write_system_info: bo
                 write_args_line(ofile, lang + '_link_args', infos.link_args[lang])
         ofile.write('\n')
 
+        ofile.write('[properties]\n')
+        for k, v in infos.properties.items():
+            write_args_line(ofile, k, v)
+        ofile.write('\n')
+
+        if infos.cmake:
+            ofile.write('[cmake]\n\n')
+            for k, v in infos.cmake.items():
+                write_args_line(ofile, k, v)
+            ofile.write('\n')
+
         if write_system_info:
             ofile.write('[host_machine]\n')
             ofile.write(f"cpu = '{infos.cpu}'\n")
             ofile.write(f"cpu_family = '{infos.cpu_family}'\n")
             ofile.write(f"endian = '{infos.endian}'\n")
             ofile.write(f"system = '{infos.system}'\n")
+            if infos.subsystem:
+                ofile.write(f"subsystem = '{infos.subsystem}'\n")
+            if infos.kernel:
+                ofile.write(f"kernel = '{infos.kernel}'\n")
+
     os.replace(tmpfilename, ofilename)
 
-def detect_language_args_from_envvars(langname: str, envvar_suffix: str ='') -> Tuple[List[str], List[str]]:
-    ldflags = tuple(shlex.split(os.environ.get('LDFLAGS' + envvar_suffix, '')))
-    compile_args = shlex.split(os.environ.get(UNIXY_ENVVARS_FLAGS[langname] + envvar_suffix, ''))
-    if langname in LANGS_USING_CPPFLAGS:
+def detect_language_args_from_envvars(langname: str, envvar_suffix: str = '') -> T.Tuple[T.List[str], T.List[str]]:
+    compile_args = []
+    if langname in compilers.CFLAGS_MAPPING:
+        compile_args = shlex.split(os.environ.get(compilers.CFLAGS_MAPPING[langname] + envvar_suffix, ''))
+    if langname in compilers.LANGUAGES_USING_CPPFLAGS:
         cppflags = tuple(shlex.split(os.environ.get('CPPFLAGS' + envvar_suffix, '')))
         lang_compile_args = list(cppflags) + compile_args
     else:
         lang_compile_args = compile_args
-    lang_link_args = list(ldflags) + compile_args
+    lang_link_args = []
+    if langname in compilers.LANGUAGES_USING_LDFLAGS:
+        lang_link_args += shlex.split(os.environ.get('LDFLAGS' + envvar_suffix, ''))
+    lang_link_args += compile_args
     return (lang_compile_args, lang_link_args)
 
-def detect_compilers_from_envvars(envvar_suffix:str ='') -> MachineInfo:
+def detect_compilers_from_envvars(envvar_suffix: str = '') -> MachineInfo:
     infos = MachineInfo()
-    for langname, envvarname in UNIXY_ENVVARS_COMPILER.items():
+    for langname, envvarname in envconfig.ENV_VAR_COMPILER_MAP.items():
         compilerstr = os.environ.get(envvarname + envvar_suffix)
         if not compilerstr:
             continue
-        compiler = shlex.split(compilerstr)
+        if os.path.exists(compilerstr):
+            compiler = [compilerstr]
+        else:
+            compiler = shlex.split(compilerstr)
         infos.compilers[langname] = compiler
         lang_compile_args, lang_link_args = detect_language_args_from_envvars(langname, envvar_suffix)
         if lang_compile_args:
@@ -284,32 +354,42 @@ def detect_compilers_from_envvars(envvar_suffix:str ='') -> MachineInfo:
             infos.link_args[langname] = lang_link_args
     return infos
 
-def detect_binaries_from_envvars(infos: MachineInfo, envvar_suffix:str ='') -> None:
-    for binname, envvar_base in UNIXY_ENVVARS_TOOLS.items():
+def detect_binaries_from_envvars(infos: MachineInfo, envvar_suffix: str = '') -> None:
+    for binname, envvar_base in envconfig.ENV_VAR_TOOL_MAP.items():
         envvar = envvar_base + envvar_suffix
         binstr = os.environ.get(envvar)
         if binstr:
             infos.binaries[binname] = shlex.split(binstr)
 
-def detect_cross_system(infos: MachineInfo, options: Any) -> None:
-    for optname in ('system', 'cpu', 'cpu_family', 'endian'):
+def detect_properties_from_envvars(infos: MachineInfo, envvar_suffix: str = '') -> None:
+    var = os.environ.get('PKG_CONFIG_LIBDIR' + envvar_suffix)
+    if var is not None:
+        infos.properties['pkg_config_libdir'] = var
+    var = os.environ.get('PKG_CONFIG_SYSROOT_DIR' + envvar_suffix)
+    if var is not None:
+        infos.properties['sys_root'] = var
+
+def detect_cross_system(infos: MachineInfo, options: T.Any) -> None:
+    for optname in ('system', 'subsystem', 'kernel', 'cpu', 'cpu_family', 'endian'):
         v = getattr(options, optname)
         if not v:
             mlog.error(f'Cross property "{optname}" missing, set it with --{optname.replace("_", "-")}.')
             sys.exit(1)
         setattr(infos, optname, v)
 
-def detect_cross_env(options: Any) -> MachineInfo:
+def detect_cross_env(options: T.Any) -> MachineInfo:
     if options.debarch:
-        print('Detecting cross environment via dpkg-reconfigure.')
+        print('Detecting cross environment via dpkg-architecture.')
         infos = detect_cross_debianlike(options)
     else:
         print('Detecting cross environment via environment variables.')
         infos = detect_compilers_from_envvars()
         detect_cross_system(infos, options)
+    detect_binaries_from_envvars(infos)
+    detect_properties_from_envvars(infos)
     return infos
 
-def add_compiler_if_missing(infos: MachineInfo, langname: str, exe_names: List[str]) -> None:
+def add_compiler_if_missing(infos: MachineInfo, langname: str, exe_names: T.List[str]) -> None:
     if langname in infos.compilers:
         return
     for exe_name in exe_names:
@@ -325,20 +405,22 @@ def add_compiler_if_missing(infos: MachineInfo, langname: str, exe_names: List[s
         return
 
 def detect_missing_native_compilers(infos: MachineInfo) -> None:
-    # Any per-platform special detection should go here.
-    for langname, exes in TYPICAL_UNIXY_COMPILER_NAMES.items():
+    # T.Any per-platform special detection should go here.
+    for langname, exes in compiler_names.items():
+        if langname not in envconfig.ENV_VAR_COMPILER_MAP:
+            continue
         add_compiler_if_missing(infos, langname, exes)
 
 def detect_missing_native_binaries(infos: MachineInfo) -> None:
-    # Any per-platform special detection should go here.
-    for toolname in sorted(UNIXY_ENVVARS_TOOLS.keys()):
+    # T.Any per-platform special detection should go here.
+    for toolname in sorted(envconfig.ENV_VAR_TOOL_MAP.keys()):
         if toolname in infos.binaries:
             continue
         exe = shutil.which(toolname)
         if exe:
             infos.binaries[toolname] = [exe]
 
-def detect_native_env(options: Any) -> MachineInfo:
+def detect_native_env(options: T.Any) -> MachineInfo:
     use_for_build = has_for_build()
     if use_for_build:
         mlog.log('Using FOR_BUILD envvars for detection')
@@ -350,9 +432,10 @@ def detect_native_env(options: Any) -> MachineInfo:
     detect_missing_native_compilers(infos)
     detect_binaries_from_envvars(infos, esuffix)
     detect_missing_native_binaries(infos)
+    detect_properties_from_envvars(infos, esuffix)
     return infos
 
-def run(options: Any) -> None:
+def run(options: T.Any) -> None:
     if options.cross and options.native:
         sys.exit('You can only specify either --cross or --native, not both.')
     if not options.cross and not options.native:

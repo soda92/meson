@@ -1,5 +1,7 @@
 project('install tag', 'c')
 
+subproject('subproject')
+
 subdir('subdir')
 
 # Those files should not be tagged
@@ -31,10 +33,30 @@ configure_file(input: 'foo.in', output: 'foo2-devel.h',
 static_library('static', 'lib.c',
   install: true,
 )
+custom_target('ct-header1',
+  output: ['ct-header1.h'],
+  command: ['script.py', '@OUTPUT@'],
+  install_dir: get_option('includedir'),
+  install: true,
+)
+custom_target('ct-header2',
+  output: ['ct-header2.h', 'ct-header3.h'],
+  command: ['script.py', '@OUTPUT@'],
+  install_dir: [false, get_option('includedir')],
+  install: true,
+)
+install_emptydir(get_option('includedir') / 'subdir-devel')
+install_subdir('custom_files',
+  install_dir: get_option('includedir'),
+)
 
 # Those files should have 'runtime' tag
 executable('app', 'main.c',
   install: true,
+)
+executable('app-otherdir', 'main.c',
+  install: true,
+  install_dir: 'otherbin',
 )
 shared_library('shared', 'lib.c',
   install: true,
@@ -73,6 +95,12 @@ custom_target('ct2',
 install_subdir('custom_files',
   install_dir: get_option('datadir'),
   install_tag: 'custom',
+)
+install_subdir('excludes',
+  install_dir: get_option('datadir'),
+  install_tag: 'custom',
+  exclude_directories: 'excluded',
+  exclude_files: 'excluded.txt',
 )
 
 # First is custom, 2nd is devel, 3rd has no tag

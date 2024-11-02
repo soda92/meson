@@ -6,12 +6,14 @@ are placed in a separate subdirectory. This goes against common Unix
 tradition where you build your projects in-source. Building out of
 source gives two major advantages.
 
-First of all this makes for very simple `.gitignore` files. In
+First of all this makes for very simple VCS "ignore" files. In
 classical build systems you may need to have tens of lines of
 definitions, most of which contain wildcards. When doing out of source
 builds all of this busywork goes away. A common ignore file for a
 Meson project only contains a few lines that are the build directory
-and IDE project files.
+and IDE project files. (Note that since Meson 0.57.0, build directories
+are automatically ignored for git and mercurial by generating an ignore
+file inside the build directory.)
 
 Secondly this makes it very easy to clean your projects: just delete
 the build subdirectory and you are done. There is no need to guess
@@ -39,7 +41,7 @@ builds as fast as possible. This is the default project type for
 Meson, so setting it up is simple.
 
     mkdir builddir
-    meson builddir
+    meson setup builddir
 
 Another common setup is to build with debug and optimizations to, for
 example, run performance tests. Setting this up is just as simple.
@@ -51,7 +53,7 @@ For systems where the default compiler is GCC, we would like to
 compile with Clang, too. So let's do that.
 
     mkdir buildclang
-    CC=clang CXX=clang++ meson buildclang
+    CC=clang CXX=clang++ meson setup buildclang
 
 You can add cross builds, too. As an example, let's set up a Linux ->
 Windows cross compilation build using MinGW.
@@ -84,7 +86,7 @@ The steps to run it with Meson are very simple.
 
     rm -rf buildscan
     mkdir buildscan
-    scan-build meson buildscan
+    scan-build meson setup buildscan
     cd buildscan
     scan-build ninja
 

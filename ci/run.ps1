@@ -3,25 +3,26 @@ if ($LastExitCode -ne 0) {
   exit 0
 }
 
-# remove Chocolately, MinGW, Strawberry Perl from path, so we don't find gcc/gfortran and try to use it
+# remove Chocolatey, MinGW, Strawberry Perl from path, so we don't find gcc/gfortran and try to use it
 # remove PostgreSQL from path so we don't pickup a broken zlib from it
 $env:Path = ($env:Path.Split(';') | Where-Object { $_ -notmatch 'mingw|Strawberry|Chocolatey|PostgreSQL' }) -join ';'
 
 if ($env:arch -eq 'x64') {
+    rustup default 1.77
     # Rust puts its shared stdlib in a secret place, but it is needed to run tests.
-    $env:Path += ";$HOME/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin"
+    $env:Path += ";$HOME/.rustup/toolchains/1.77-x86_64-pc-windows-msvc/bin"
 } elseif ($env:arch -eq 'x86') {
     # Switch to the x86 Rust toolchain
-    rustup default stable-i686-pc-windows-msvc
-
-    # Also install clippy
-    rustup component add clippy
+    rustup default 1.77-i686-pc-windows-msvc
 
     # Rust puts its shared stdlib in a secret place, but it is needed to run tests.
-    $env:Path += ";$HOME/.rustup/toolchains/stable-i686-pc-windows-msvc/bin"
+    $env:Path += ";$HOME/.rustup/toolchains/1.77-i686-pc-windows-msvc/bin"
     # Need 32-bit Python for tests that need the Python dependency
     $env:Path = "C:\hostedtoolcache\windows\Python\3.7.9\x86;C:\hostedtoolcache\windows\Python\3.7.9\x86\Scripts;$env:Path"
 }
+
+# Also install clippy
+rustup component add clippy
 
 # Set the CI env var for the meson test framework
 $env:CI = '1'
@@ -49,7 +50,7 @@ function DownloadFile([String] $Source, [String] $Destination) {
 
 if (($env:backend -eq 'ninja') -and ($env:arch -ne 'arm64')) { $dmd = $true } else { $dmd = $false }
 
-DownloadFile -Source https://github.com/mesonbuild/cidata/releases/download/ci3/ci_data.zip -Destination $env:AGENT_WORKFOLDER\ci_data.zip
+DownloadFile -Source https://github.com/mesonbuild/cidata/releases/download/ci5/ci_data.zip -Destination $env:AGENT_WORKFOLDER\ci_data.zip
 echo "Extracting ci_data.zip"
 Expand-Archive $env:AGENT_WORKFOLDER\ci_data.zip -DestinationPath $env:AGENT_WORKFOLDER\ci_data
 & "$env:AGENT_WORKFOLDER\ci_data\install.ps1" -Arch $env:arch -Compiler $env:compiler -Boost $true -DMD $dmd
@@ -59,6 +60,9 @@ if ($env:arch -eq 'x64') {
     Expand-Archive $env:AGENT_WORKFOLDER\pypy38.zip -DestinationPath $env:AGENT_WORKFOLDER\pypy38
     $ENV:Path = $ENV:Path + ";$ENV:AGENT_WORKFOLDER\pypy38\pypy3.8-v7.3.9-win64;$ENV:AGENT_WORKFOLDER\pypy38\pypy3.8-v7.3.9-win64\Scripts"
     pypy3 -m ensurepip
+
+    DownloadFile -Source https://www.python.org/ftp/python/2.7.18/python-2.7.18.amd64.msi -Destination $env:AGENT_WORKFOLDER\python27.msi
+    Start-Process msiexec.exe -Wait -ArgumentList "/I $env:AGENT_WORKFOLDER\python27.msi /quiet"
 }
 
 
@@ -67,7 +71,7 @@ echo ($env:Path).Replace(';',"`n")
 echo "=== PATH END ==="
 echo ""
 
-$progs = @("python","ninja","pkg-config","cl","rc","link","pypy3")
+$progs = @("python","ninja","pkg-config","cl","rc","link","pypy3","ifort")
 foreach ($prog in $progs) {
   echo ""
   echo "Locating ${prog}:"
@@ -76,7 +80,7 @@ foreach ($prog in $progs) {
 
 
 echo ""
-echo "Ninja / MSBuld version:"
+echo "Ninja / MSBuild version:"
 if ($env:backend -eq 'ninja') {
   ninja --version
 } else {
@@ -89,7 +93,10 @@ python --version
 
 # Needed for running unit tests in parallel.
 echo ""
-python -m pip --disable-pip-version-check install --upgrade pefile pytest-xdist pytest-subtests jsonschema coverage
+python -m pip --disable-pip-version-check install --upgrade pefile pytest-xdist pytest-subtests fastjsonschema coverage
+
+# Needed for running the Cython tests
+python -m pip --disable-pip-version-check install cython
 
 echo ""
 echo "=== Start running tests ==="
@@ -98,21 +105,4 @@ echo "=== Start running tests ==="
 # does that by default so we need to forward it.
 cmd /c "python 2>&1 ./tools/run_with_cov.py  run_tests.py --backend $env:backend $env:extraargs"
 
-$result = $LastExitCode
-
-echo ""
-echo ""
-echo "=== Gathering coverage report ==="
-echo ""
-
-python3 -m coverage combine
-python3 -m coverage xml
-python3 -m coverage report
-
-# Currently codecov.py does not handle Azure, use this fork of a fork to get it
-# working without requiring a token
-git clone https://github.com/mensinda/codecov-python
-python3 -m pip install --ignore-installed ./codecov-python
-python3 -m codecov -f .coverage/coverage.xml -n "VS$env:compiler $env:arch $env:backend" -c $env:SOURCE_VERSION
-
-exit $result
+exit $LastExitCode

@@ -1,16 +1,7 @@
-# Copyright 2019 The meson development team
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2019-2022 The meson development team
+
+from __future__ import annotations
 
 """Abstractions for the LLVM/Clang compiler family."""
 
@@ -19,8 +10,9 @@ import shutil
 import typing as T
 
 from ... import mesonlib
-from ...linkers import AppleDynamicLinker, ClangClDynamicLinker, LLVMDynamicLinker, GnuGoldDynamicLinker
-from ...mesonlib import OptionKey
+from ...linkers.linkers import AppleDynamicLinker, ClangClDynamicLinker, LLVMDynamicLinker, GnuGoldDynamicLinker, \
+    MoldDynamicLinker, MSVCDynamicLinker
+from ...options import OptionKey
 from ..compilers import CompileCheckMode
 from .gnu import GnuLikeCompiler
 
@@ -28,20 +20,28 @@ if T.TYPE_CHECKING:
     from ...environment import Environment
     from ...dependencies import Dependency  # noqa: F401
 
-clang_color_args = {
-    'auto': ['-fcolor-diagnostics'],
-    'always': ['-fcolor-diagnostics'],
-    'never': ['-fno-color-diagnostics'],
-}  # type: T.Dict[str, T.List[str]]
+clang_color_args: T.Dict[str, T.List[str]] = {
+    'auto': ['-fdiagnostics-color=auto'],
+    'always': ['-fdiagnostics-color=always'],
+    'never': ['-fdiagnostics-color=never'],
+}
 
-clang_optimization_args = {
+clang_optimization_args: T.Dict[str, T.List[str]] = {
+    'plain': [],
     '0': ['-O0'],
     'g': ['-Og'],
     '1': ['-O1'],
     '2': ['-O2'],
     '3': ['-O3'],
     's': ['-Oz'],
-}  # type: T.Dict[str, T.List[str]]
+}
+
+clang_lang_map = {
+    'c': 'c',
+    'cpp': 'c++',
+    'objc': 'objective-c',
+    'objcpp': 'objective-c++',
+}
 
 class ClangCompiler(GnuLikeCompiler):
 
@@ -51,12 +51,15 @@ class ClangCompiler(GnuLikeCompiler):
         super().__init__()
         self.defines = defines or {}
         self.base_options.update(
-            {OptionKey('b_colorout'), OptionKey('b_lto_threads'), OptionKey('b_lto_mode')})
+            {OptionKey('b_colorout'), OptionKey('b_lto_threads'), OptionKey('b_lto_mode'), OptionKey('b_thinlto_cache'),
+             OptionKey('b_thinlto_cache_dir')})
 
         # TODO: this really should be part of the linker base_options, but
         # linkers don't have base_options.
         if isinstance(self.linker, AppleDynamicLinker):
             self.base_options.add(OptionKey('b_bitcode'))
+        elif isinstance(self.linker, MSVCDynamicLinker):
+            self.base_options.add(OptionKey('b_vscrt'))
         # All Clang backends can also do LLVM IR
         self.can_compile_suffixes.add('ll')
 
@@ -83,9 +86,23 @@ class ClangCompiler(GnuLikeCompiler):
 
     def get_compiler_check_args(self, mode: CompileCheckMode) -> T.List[str]:
         # Clang is different than GCC, it will return True when a symbol isn't
-        # defined in a header. Specifically this seems to have something to do
-        # with functions that may be in a header on some systems, but not all of
-        # them. `strlcat` specifically with can trigger this.
+        # defined in a header. Specifically this is caused by a functionality
+        # both GCC and clang have: for some "well known" functions, arbitrarily
+        # chosen, they provide fixit suggestions for the header you should try
+        # including.
+        #
+        # - With GCC, this is a note appended to the prexisting diagnostic
+        #   "error: undeclared identifier"
+        #
+        # - With clang, the error is converted to a c89'ish implicit function
+        #   declaration instead, which can be disabled with -Wno-error and on
+        #   clang < 16, simply passes compilation by default.
+        #
+        # One example of a clang fixit suggestion is for `strlcat`, which
+        # triggers this.
+        #
+        # This was reported in 2017 and promptly fixed. Just kidding!
+        # https://github.com/llvm/llvm-project/issues/33905
         myargs: T.List[str] = ['-Werror=implicit-function-declaration']
         if mode is CompileCheckMode.COMPILE:
             myargs.extend(['-Werror=unknown-warning-option', '-Werror=unused-command-line-argument'])
@@ -108,7 +125,7 @@ class ClangCompiler(GnuLikeCompiler):
         return super().has_function(funcname, prefix, env, extra_args=extra_args,
                                     dependencies=dependencies)
 
-    def openmp_flags(self) -> T.List[str]:
+    def openmp_flags(self, env: Environment) -> T.List[str]:
         if mesonlib.version_compare(self.version, '>=3.8.0'):
             return ['-fopenmp']
         elif mesonlib.version_compare(self.version, '>=3.7.0'):
@@ -117,8 +134,15 @@ class ClangCompiler(GnuLikeCompiler):
             # Shouldn't work, but it'll be checked explicitly in the OpenMP dependency.
             return []
 
+    def gen_vs_module_defs_args(self, defsfile: str) -> T.List[str]:
+        if isinstance(self.linker, (MSVCDynamicLinker)):
+            # With MSVC, DLLs only export symbols that are explicitly exported,
+            # so if a module defs file is specified, we use that to export symbols
+            return ['-Wl,/DEF:' + defsfile]
+        return super().gen_vs_module_defs_args(defsfile)
+
     @classmethod
-    def use_linker_args(cls, linker: str) -> T.List[str]:
+    def use_linker_args(cls, linker: str, version: str) -> T.List[str]:
         # Clang additionally can use a linker specified as a path, which GCC
         # (and other gcc-like compilers) cannot. This is because clang (being
         # llvm based) is retargetable, while GCC is not.
@@ -127,13 +151,15 @@ class ClangCompiler(GnuLikeCompiler):
         # qcld: Qualcomm Snapdragon linker, based on LLVM
         if linker == 'qcld':
             return ['-fuse-ld=qcld']
+        if linker == 'mold':
+            return ['-fuse-ld=mold']
 
         if shutil.which(linker):
             if not shutil.which(linker):
                 raise mesonlib.MesonException(
                     f'Cannot find linker {linker}.')
             return [f'-fuse-ld={linker}']
-        return super().use_linker_args(linker)
+        return super().use_linker_args(linker, version)
 
     def get_has_func_attribute_extra_args(self, name: str) -> T.List[str]:
         # Clang only warns about unknown or ignored attributes, so force an
@@ -146,17 +172,32 @@ class ClangCompiler(GnuLikeCompiler):
     def get_lto_compile_args(self, *, threads: int = 0, mode: str = 'default') -> T.List[str]:
         args: T.List[str] = []
         if mode == 'thin':
-            # Thin LTO requires the use of gold, lld, ld64, or lld-link
-            if not isinstance(self.linker, (AppleDynamicLinker, ClangClDynamicLinker, LLVMDynamicLinker, GnuGoldDynamicLinker)):
-                raise mesonlib.MesonException(f"LLVM's thinLTO only works with gnu gold, lld, lld-link, and ld64, not {self.linker.id}")
+            # ThinLTO requires the use of gold, lld, ld64, lld-link or mold 1.1+
+            if isinstance(self.linker, (MoldDynamicLinker)):
+                # https://github.com/rui314/mold/commit/46995bcfc3e3113133620bf16445c5f13cd76a18
+                if not mesonlib.version_compare(self.linker.version, '>=1.1'):
+                    raise mesonlib.MesonException("LLVM's ThinLTO requires mold 1.1+")
+            elif not isinstance(self.linker, (AppleDynamicLinker, ClangClDynamicLinker, LLVMDynamicLinker, GnuGoldDynamicLinker)):
+                raise mesonlib.MesonException(f"LLVM's ThinLTO only works with gold, lld, lld-link, ld64 or mold, not {self.linker.id}")
             args.append(f'-flto={mode}')
         else:
             assert mode == 'default', 'someone forgot to wire something up'
             args.extend(super().get_lto_compile_args(threads=threads))
         return args
 
-    def get_lto_link_args(self, *, threads: int = 0, mode: str = 'default') -> T.List[str]:
+    def linker_to_compiler_args(self, args: T.List[str]) -> T.List[str]:
+        if isinstance(self.linker, (ClangClDynamicLinker, MSVCDynamicLinker)):
+            return [flag if flag.startswith('-Wl,') else f'-Wl,{flag}' for flag in args]
+        else:
+            return args
+
+    def get_lto_link_args(self, *, threads: int = 0, mode: str = 'default',
+                          thinlto_cache_dir: T.Optional[str] = None) -> T.List[str]:
         args = self.get_lto_compile_args(threads=threads, mode=mode)
+        if mode == 'thin' and thinlto_cache_dir is not None:
+            # We check for ThinLTO linker support above in get_lto_compile_args, and all of them support
+            # get_thinlto_cache_args as well
+            args.extend(self.linker.get_thinlto_cache_args(thinlto_cache_dir))
         # In clang -flto-jobs=0 means auto, and is the default if unspecified, just like in meson
         if threads > 0:
             if not mesonlib.version_compare(self.version, '>=4.0.0'):

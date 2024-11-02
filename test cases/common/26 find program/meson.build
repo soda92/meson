@@ -1,4 +1,4 @@
-project('find program', 'c')
+project('find program')
 
 if build_machine.system() == 'windows'
   # Things Windows does not provide:
@@ -15,6 +15,7 @@ else
    arguments : ['@INPUT@', '@OUTPUT@'])
 
   generated = gen.process('source.in')
+  add_languages('c', required: true)
   e = executable('prog', generated)
   test('external exe', e)
 endif
@@ -31,8 +32,11 @@ assert(prog.version() == '1.0', 'Program version should be detectable')
 prog = find_program('print-version-with-prefix.py', version : '>=1.0')
 assert(prog.found(), 'Program version should match')
 
+prog = find_program('print-version-custom-argument.py', version : '>=1.0', version_argument : '-version')
+assert(prog.found(), 'Program version should match')
+
 prog = find_program('test_subdir.py', required : false)
 assert(not prog.found(), 'Program should not be found')
 
-prog = find_program('test_subdir.py', dirs : ['/donotexist', meson.current_source_dir() / 'scripts'])
+prog = find_program('test_subdir.py', dirs : ['/nonexistent', meson.current_source_dir() / 'scripts'])
 assert(prog.found(), 'Program should be found')
